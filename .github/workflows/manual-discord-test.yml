@@ -23,25 +23,32 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Resolve and validate secrets
+      - name: Resolve and validate credentials
         env:
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          X_API_BEARER_TOKEN: ${{ secrets.X_API_BEARER_TOKEN }}
-          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Secrets (recommended)
+          SECRET_X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          SECRET_X_API_BEARER_TOKEN: ${{ secrets.X_API_BEARER_TOKEN }}
+          SECRET_TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          SECRET_DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Repository/environment variables (fallback)
+          VAR_X_BEARER_TOKEN: ${{ vars.X_BEARER_TOKEN }}
+          VAR_X_API_BEARER_TOKEN: ${{ vars.X_API_BEARER_TOKEN }}
+          VAR_TWITTER_BEARER_TOKEN: ${{ vars.TWITTER_BEARER_TOKEN }}
+          VAR_DISCORD_WEBHOOK_URL: ${{ vars.DISCORD_WEBHOOK_URL }}
           X_USERNAME: ${{ github.event.inputs.x_username }}
         run: |
           set -euo pipefail
 
-          BEARER_TOKEN="${X_BEARER_TOKEN:-${X_API_BEARER_TOKEN:-${TWITTER_BEARER_TOKEN:-}}}"
+          BEARER_TOKEN="${SECRET_X_BEARER_TOKEN:-${SECRET_X_API_BEARER_TOKEN:-${SECRET_TWITTER_BEARER_TOKEN:-${VAR_X_BEARER_TOKEN:-${VAR_X_API_BEARER_TOKEN:-${VAR_TWITTER_BEARER_TOKEN:-}}}}}}"
+          DISCORD_WEBHOOK_URL="${SECRET_DISCORD_WEBHOOK_URL:-${VAR_DISCORD_WEBHOOK_URL:-}}"
 
           if [ -z "${BEARER_TOKEN}" ]; then
-            echo "::error::Missing X bearer token secret. Add one of: X_BEARER_TOKEN, X_API_BEARER_TOKEN, or TWITTER_BEARER_TOKEN"
+            echo "::error::Missing X bearer token. Add one of these as a Secret or Variable: X_BEARER_TOKEN, X_API_BEARER_TOKEN, or TWITTER_BEARER_TOKEN"
             exit 1
           fi
 
           if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
-            echo "::error::Missing DISCORD_WEBHOOK_URL secret"
+            echo "::error::Missing Discord webhook URL. Add DISCORD_WEBHOOK_URL as a Secret or Variable"
             exit 1
           fi
 
