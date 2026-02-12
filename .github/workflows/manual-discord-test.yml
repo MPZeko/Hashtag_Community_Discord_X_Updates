@@ -1,0 +1,53 @@
+name: Manual X -> Discord test
+
+on:
+  workflow_dispatch:
+    inputs:
+      x_username:
+        description: "X username to test (without @). Leave empty to use default/env value."
+        required: false
+        default: "hashtagutd"
+
+jobs:
+  send-latest-post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Resolve and validate secrets
+        env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          X_API_BEARER_TOKEN: ${{ secrets.X_API_BEARER_TOKEN }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          X_USERNAME: ${{ github.event.inputs.x_username }}
+        run: |
+          set -euo pipefail
+
+          BEARER_TOKEN="${X_BEARER_TOKEN:-${X_API_BEARER_TOKEN:-${TWITTER_BEARER_TOKEN:-}}}"
+
+          if [ -z "${BEARER_TOKEN}" ]; then
+            echo "::error::Missing X bearer token secret. Add one of: X_BEARER_TOKEN, X_API_BEARER_TOKEN, or TWITTER_BEARER_TOKEN"
+            exit 1
+          fi
+
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "::error::Missing DISCORD_WEBHOOK_URL secret"
+            exit 1
+          fi
+
+          echo "X_BEARER_TOKEN=${BEARER_TOKEN}" >> "$GITHUB_ENV"
+          echo "DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}" >> "$GITHUB_ENV"
+          echo "X_USERNAME=${X_USERNAME}" >> "$GITHUB_ENV"
+
+      - name: Run one-shot bridge test
+        run: python bridge.py --send-latest-once
