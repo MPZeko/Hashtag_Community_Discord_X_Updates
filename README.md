@@ -40,6 +40,7 @@ python bridge.py
 
 ## How it works
 
+- The bridge posts to Discord using the `DISCORD_WEBHOOK_URL` webhook endpoint.
 - The bot looks up the user ID for `X_USERNAME`.
 - It polls for new tweets every `POLL_INTERVAL_SECONDS`.
 - Only original posts are forwarded (no replies or retweets).
@@ -71,13 +72,15 @@ You can manually test the integration from GitHub without running the bot contin
 2. Go to **Actions** and open the workflow **Manual X -> Discord test**.
 3. Click **Run workflow**.
 4. Choose `test_mode`:
-   - `latest_post`: fetch latest post from X and send it to Discord (requires bearer token).
-   - `webhook_only`: send a Discord test message only (no X token required).
+   - `latest_post`: fetch latest post from official X API and send it to Discord (**requires token**).
+   - `latest_public_no_token`: fetch latest post from a public RSS mirror and send it to Discord (**no token**, best-effort).
+   - `webhook_only`: send a Discord test message only (**no token**, does not fetch from X).
 5. (Optional) Set `x_username` (without `@`) if you want to test another account.
+6. (Optional) Add `PUBLIC_X_RSS_URL_TEMPLATE` as an Actions Variable to override the fallback feed source (default: `https://nitter.net/{username}/rss`).
 
 This is intended for manual validation and does not use `state.json`.
 
-If the workflow fails with a missing bearer token, switch to `webhook_only` mode to verify Discord delivery first, or add one of the supported X token names.
+If you do not have an X token, use `latest_public_no_token` or `webhook_only`.
 
 ## Deployment suggestion
 

@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - latest_post
+          - latest_public_no_token
           - webhook_only
       x_username:
         description: "X username to test (without @). Leave empty to use default/env value."
@@ -45,6 +46,7 @@ jobs:
           VAR_TWITTER_BEARER_TOKEN: ${{ vars.TWITTER_BEARER_TOKEN }}
           VAR_DISCORD_WEBHOOK_URL: ${{ vars.DISCORD_WEBHOOK_URL }}
           X_USERNAME: ${{ github.event.inputs.x_username }}
+          PUBLIC_X_RSS_URL_TEMPLATE: ${{ vars.PUBLIC_X_RSS_URL_TEMPLATE }}
         run: |
           set -euo pipefail
 
@@ -57,7 +59,7 @@ jobs:
           fi
 
           if [ "${TEST_MODE}" = "latest_post" ] && [ -z "${BEARER_TOKEN}" ]; then
-            echo "::error::Missing X bearer token for latest_post mode. Add one of these as a Secret or Variable: X_BEARER_TOKEN, X_API_BEARER_TOKEN, or TWITTER_BEARER_TOKEN"
+            echo "::error::Missing X bearer token for latest_post mode. Use latest_public_no_token mode if you do not have a token."
             exit 1
           fi
 
@@ -66,10 +68,16 @@ jobs:
           echo "X_USERNAME=${X_USERNAME}" >> "$GITHUB_ENV"
           echo "TEST_MODE=${TEST_MODE}" >> "$GITHUB_ENV"
 
+          if [ -n "${PUBLIC_X_RSS_URL_TEMPLATE:-}" ]; then
+            echo "PUBLIC_X_RSS_URL_TEMPLATE=${PUBLIC_X_RSS_URL_TEMPLATE}" >> "$GITHUB_ENV"
+          fi
+
       - name: Run selected test mode
         run: |
           if [ "${TEST_MODE}" = "webhook_only" ]; then
             python bridge.py --webhook-test-only
+          elif [ "${TEST_MODE}" = "latest_public_no_token" ]; then
+            python bridge.py --send-latest-public-once
           else
             python bridge.py --send-latest-once
           fi

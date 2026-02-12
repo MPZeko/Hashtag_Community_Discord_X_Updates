@@ -1,8 +1,10 @@
+import argparse
+import html
 import json
 import logging
 import os
 import time
-import argparse
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -18,6 +20,8 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger("x-discord-bridge")
+
+DEFAULT_PUBLIC_X_RSS_URL_TEMPLATE = "https://nitter.net/{username}/rss"
 
 
 @dataclass
@@ -185,8 +189,8 @@ class XToDiscordBridge:
             time.sleep(self.config.poll_interval_seconds)
 
     def send_latest_tweet_once(self) -> None:
-        """One-shot mode used for manual validation (e.g., GitHub Actions)."""
-        logger.info("Running one-shot test: fetch latest tweet and post to Discord")
+        """One-shot mode used for manual validation (official X API mode)."""
+        logger.info("Running one-shot test: fetch latest tweet via X API and post to Discord")
         tweet = self._fetch_latest_tweet()
         if not tweet:
             logger.info("No tweets found for @%s", self.config.x_username)
@@ -210,6 +214,72 @@ def send_webhook_test_message(webhook_url: str, x_username: str) -> None:
         raise BridgeError(
             f"Could not send webhook-only test message ({response.status_code}): {response.text}"
         )
+
+
+def send_latest_public_post_once(config: Config) -> None:
+    """
+    Best-effort no-token fallback:
+    fetch latest post from a public RSS mirror and send to Discord.
+    """
+    template = os.getenv(
+        "PUBLIC_X_RSS_URL_TEMPLATE", DEFAULT_PUBLIC_X_RSS_URL_TEMPLATE
+    ).strip()
+    rss_url = template.format(username=config.x_username)
+
+    logger.info("Fetching latest public RSS item from %s", rss_url)
+    response = requests.get(
+        rss_url,
+        timeout=20,
+        headers={"User-Agent": "hashtag-utd-x-discord-bridge/1.0"},
+    )
+    if response.status_code >= 400:
+        raise BridgeError(
+            f"Could not fetch public RSS feed ({response.status_code}): {response.text[:200]}"
+        )
+
+    try:
+        root = ET.fromstring(response.text)
+    except ET.ParseError as exc:
+        raise BridgeError(f"Could not parse RSS XML: {exc}") from exc
+
+    channel = root.find("channel")
+    if channel is None:
+        raise BridgeError("RSS feed did not contain a channel node")
+
+    item = channel.find("item")
+    if item is None:
+        raise BridgeError("RSS feed had no items")
+
+    title = (item.findtext("title") or "").strip()
+    link = (item.findtext("link") or "").strip()
+    description = (item.findtext("description") or "").strip()
+
+    text = html.unescape(title or description or "Latest public post")
+    if len(text) > 4000:
+        text = f"{text[:3997]}..."
+
+    embed = {
+        "title": f"Latest public post from @{config.x_username}",
+        "description": text,
+        "url": link if link else f"https://x.com/{config.x_username}",
+        "color": 1942002,
+        "footer": {"text": "X → Discord bridge (public RSS fallback)"},
+    }
+
+    payload = {
+        "username": "Hashtag Utd X Bot",
+        "content": f"📡 Public fallback latest post for @{config.x_username}",
+        "embeds": [embed],
+    }
+
+    discord_response = requests.post(config.discord_webhook_url, json=payload, timeout=20)
+    if discord_response.status_code >= 400:
+        raise BridgeError(
+            "Could not send public fallback post to Discord "
+            f"({discord_response.status_code}): {discord_response.text}"
+        )
+
+    logger.info("Successfully sent latest public fallback post to Discord")
 
 
 def load_config(require_x_token: bool = True) -> Config:
@@ -248,8 +318,16 @@ def parse_args() -> argparse.Namespace:
         "--send-latest-once",
         action="store_true",
         help=(
-            "Fetch the latest post from the configured account and send it to Discord "
-            "once, then exit. Useful for manual workflow testing."
+            "Fetch the latest post from X API and send it to Discord once, then exit. "
+            "Requires X token."
+        ),
+    )
+    parser.add_argument(
+        "--send-latest-public-once",
+        action="store_true",
+        help=(
+            "Fetch latest post from a public RSS mirror and send it once to Discord. "
+            "No X token required."
         ),
     )
     parser.add_argument(
@@ -257,7 +335,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Send a Discord webhook-only test message and exit. "
-            "Does not require an X token."
+            "Does not fetch from X and does not require an X token."
         ),
     )
     return parser.parse_args()
@@ -269,6 +347,9 @@ if __name__ == "__main__":
     if args.webhook_test_only:
         cfg = load_config(require_x_token=False)
         send_webhook_test_message(cfg.discord_webhook_url, cfg.x_username)
+    elif args.send_latest_public_once:
+        cfg = load_config(require_x_token=False)
+        send_latest_public_post_once(cfg)
     else:
         cfg = load_config(require_x_token=True)
         bridge = XToDiscordBridge(cfg)
