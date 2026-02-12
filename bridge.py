@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -9,6 +10,7 @@ from typing import Optional
 import requests
 from dotenv import load_dotenv
 
+# Load environment variables from .env before creating config/logging objects.
 load_dotenv()
 
 logging.basicConfig(
@@ -34,6 +36,8 @@ class BridgeError(Exception):
 class XToDiscordBridge:
     def __init__(self, config: Config) -> None:
         self.config = config
+
+        # Keep one reusable HTTP session for all X API requests.
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -44,6 +48,7 @@ class XToDiscordBridge:
         self.user_id: Optional[str] = None
 
     def _load_last_seen_id(self) -> Optional[str]:
+        # If the state file does not exist yet, this is the first run.
         if not self.config.state_file.exists():
             return None
 
@@ -51,7 +56,7 @@ class XToDiscordBridge:
             data = json.loads(self.config.state_file.read_text(encoding="utf-8"))
             return data.get("last_seen_id")
         except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Kunne ikke læse state fil: %s", exc)
+            logger.warning("Could not read state file: %s", exc)
             return None
 
     def _save_last_seen_id(self, tweet_id: str) -> None:
@@ -61,6 +66,7 @@ class XToDiscordBridge:
         )
 
     def _get_user_id(self) -> str:
+        # Cache the user id after first lookup to avoid repeating this request.
         if self.user_id:
             return self.user_id
 
@@ -68,40 +74,51 @@ class XToDiscordBridge:
         response = self.session.get(url, timeout=20)
         if response.status_code >= 400:
             raise BridgeError(
-                f"Kunne ikke hente user id ({response.status_code}): {response.text}"
+                f"Could not fetch user id ({response.status_code}): {response.text}"
             )
 
         payload = response.json()
         user_data = payload.get("data")
         if not user_data or not user_data.get("id"):
-            raise BridgeError(f"Ugyldigt svar fra X API: {payload}")
+            raise BridgeError(f"Invalid response from X API: {payload}")
 
         self.user_id = user_data["id"]
-        logger.info("Fundet X user id for @%s", self.config.x_username)
+        logger.info("Found X user id for @%s", self.config.x_username)
         return self.user_id
 
     def _fetch_new_tweets(self, since_id: Optional[str]) -> list[dict]:
         user_id = self._get_user_id()
         url = f"https://api.x.com/2/users/{user_id}/tweets"
 
+        # Request original tweets only and keep the payload lightweight.
         params = {
             "max_results": 10,
             "tweet.fields": "created_at,public_metrics",
             "exclude": "retweets,replies",
         }
         if since_id:
+            # Ask only for tweets newer than the latest processed tweet id.
             params["since_id"] = since_id
 
         response = self.session.get(url, params=params, timeout=20)
         if response.status_code >= 400:
             raise BridgeError(
-                f"Kunne ikke hente tweets ({response.status_code}): {response.text}"
+                f"Could not fetch tweets ({response.status_code}): {response.text}"
             )
 
         payload = response.json()
         tweets = payload.get("data", [])
+
+        # Sort oldest -> newest so Discord receives posts in the right order.
         tweets.sort(key=lambda t: int(t["id"]))
         return tweets
+
+    def _fetch_latest_tweet(self) -> Optional[dict]:
+        """Fetch the latest original tweet (excluding replies/retweets)."""
+        tweets = self._fetch_new_tweets(since_id=None)
+        if not tweets:
+            return None
+        return tweets[-1]
 
     def _post_to_discord(self, tweet: dict) -> None:
         tweet_id = tweet["id"]
@@ -109,7 +126,7 @@ class XToDiscordBridge:
         tweet_url = f"https://x.com/{self.config.x_username}/status/{tweet_id}"
 
         embed = {
-            "title": f"Ny post fra @{self.config.x_username}",
+            "title": f"New post from @{self.config.x_username}",
             "description": tweet_text,
             "url": tweet_url,
             "color": 1942002,
@@ -118,31 +135,32 @@ class XToDiscordBridge:
 
         payload = {
             "username": "Hashtag Utd X Bot",
-            "content": f"🚨 Nyt opslag fra @{self.config.x_username}: {tweet_url}",
+            "content": f"🚨 New post from @{self.config.x_username}: {tweet_url}",
             "embeds": [embed],
         }
 
         response = requests.post(self.config.discord_webhook_url, json=payload, timeout=20)
         if response.status_code >= 400:
             raise BridgeError(
-                f"Kunne ikke sende til Discord ({response.status_code}): {response.text}"
+                f"Could not send to Discord ({response.status_code}): {response.text}"
             )
 
     def run(self) -> None:
-        logger.info("Starter bridge for @%s", self.config.x_username)
+        logger.info("Starting bridge for @%s", self.config.x_username)
         last_seen_id = self._load_last_seen_id()
 
         if not last_seen_id:
             logger.info(
-                "Ingen eksisterende state fundet. Henter seneste tweet som startpunkt."
+                "No existing state found. Fetching latest tweet as starting point."
             )
             tweets = self._fetch_new_tweets(since_id=None)
             if tweets:
+                # Initialize state with current latest tweet to avoid backfilling old posts.
                 newest = tweets[-1]["id"]
                 self._save_last_seen_id(newest)
                 last_seen_id = newest
                 logger.info(
-                    "Initialiseret state med tweet id %s (ingen historiske posts sendt)",
+                    "Initialized state with tweet id %s (historical posts were not sent)",
                     newest,
                 )
 
@@ -151,18 +169,31 @@ class XToDiscordBridge:
                 tweets = self._fetch_new_tweets(since_id=last_seen_id)
                 if tweets:
                     for tweet in tweets:
+                        # Forward each new tweet and persist progress immediately.
                         self._post_to_discord(tweet)
                         last_seen_id = tweet["id"]
                         self._save_last_seen_id(last_seen_id)
-                        logger.info("Sendte tweet %s til Discord", last_seen_id)
+                        logger.info("Sent tweet %s to Discord", last_seen_id)
                 else:
-                    logger.debug("Ingen nye tweets")
+                    logger.debug("No new tweets")
             except BridgeError as exc:
-                logger.error("Bridge fejl: %s", exc)
+                logger.error("Bridge error: %s", exc)
             except requests.RequestException as exc:
-                logger.error("Netværksfejl: %s", exc)
+                logger.error("Network error: %s", exc)
 
+            # Sleep between poll cycles to respect API limits and reduce noise.
             time.sleep(self.config.poll_interval_seconds)
+
+    def send_latest_tweet_once(self) -> None:
+        """One-shot mode used for manual validation (e.g., GitHub Actions)."""
+        logger.info("Running one-shot test: fetch latest tweet and post to Discord")
+        tweet = self._fetch_latest_tweet()
+        if not tweet:
+            logger.info("No tweets found for @%s", self.config.x_username)
+            return
+
+        self._post_to_discord(tweet)
+        logger.info("Successfully sent latest tweet %s to Discord", tweet["id"])
 
 
 def load_config() -> Config:
@@ -172,6 +203,7 @@ def load_config() -> Config:
     poll_interval = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
     state_file = Path(os.getenv("STATE_FILE", "state.json"))
 
+    # Validate required settings before starting the bridge loop.
     missing = [
         name
         for name, value in [
@@ -182,7 +214,7 @@ def load_config() -> Config:
     ]
 
     if missing:
-        raise BridgeError(f"Manglende miljøvariabler: {', '.join(missing)}")
+        raise BridgeError(f"Missing environment variables: {', '.join(missing)}")
 
     return Config(
         x_bearer_token=x_bearer_token,
@@ -193,7 +225,26 @@ def load_config() -> Config:
     )
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Forward posts from X to Discord."
+    )
+    parser.add_argument(
+        "--send-latest-once",
+        action="store_true",
+        help=(
+            "Fetch the latest post from the configured account and send it to Discord "
+            "once, then exit. Useful for manual workflow testing."
+        ),
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
     cfg = load_config()
     bridge = XToDiscordBridge(cfg)
-    bridge.run()
+    if args.send_latest_once:
+        bridge.send_latest_tweet_once()
+    else:
+        bridge.run()
