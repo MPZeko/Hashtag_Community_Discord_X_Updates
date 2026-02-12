@@ -66,16 +66,18 @@ You can also run a quick live validation:
 You can manually test the integration from GitHub without running the bot continuously.
 
 1. In your repository, go to **Settings → Secrets and variables → Actions** and add credentials as either **Secrets** (recommended) or **Variables**:
-   - `DISCORD_WEBHOOK_URL`
-   - one of: `X_BEARER_TOKEN`, `X_API_BEARER_TOKEN`, or `TWITTER_BEARER_TOKEN`
+   - `DISCORD_WEBHOOK_URL` (always required)
+   - one of: `X_BEARER_TOKEN`, `X_API_BEARER_TOKEN`, or `TWITTER_BEARER_TOKEN` (required only for `latest_post` mode)
 2. Go to **Actions** and open the workflow **Manual X -> Discord test**.
 3. Click **Run workflow**.
-4. (Optional) Set `x_username` (without `@`) if you want to test another account.
-5. The workflow runs `python bridge.py --send-latest-once`, which fetches the latest original post and sends it to your Discord channel once.
+4. Choose `test_mode`:
+   - `latest_post`: fetch latest post from X and send it to Discord (requires bearer token).
+   - `webhook_only`: send a Discord test message only (no X token required).
+5. (Optional) Set `x_username` (without `@`) if you want to test another account.
 
 This is intended for manual validation and does not use `state.json`.
 
-If the workflow fails with a missing bearer token, verify the name exactly matches one of the supported names above and that the value is set on the repository/environment where the workflow runs.
+If the workflow fails with a missing bearer token, switch to `webhook_only` mode to verify Discord delivery first, or add one of the supported X token names.
 
 ## Deployment suggestion
 

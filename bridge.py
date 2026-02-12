@@ -196,7 +196,23 @@ class XToDiscordBridge:
         logger.info("Successfully sent latest tweet %s to Discord", tweet["id"])
 
 
-def load_config() -> Config:
+def send_webhook_test_message(webhook_url: str, x_username: str) -> None:
+    """Send a Discord-only test message that does not require an X API token."""
+    payload = {
+        "username": "Hashtag Utd X Bot",
+        "content": (
+            "✅ Webhook-only test succeeded. "
+            f"This message confirms Discord webhook delivery for @{x_username}."
+        ),
+    }
+    response = requests.post(webhook_url, json=payload, timeout=20)
+    if response.status_code >= 400:
+        raise BridgeError(
+            f"Could not send webhook-only test message ({response.status_code}): {response.text}"
+        )
+
+
+def load_config(require_x_token: bool = True) -> Config:
     x_bearer_token = (
         os.getenv("X_BEARER_TOKEN", "").strip()
         or os.getenv("X_API_BEARER_TOKEN", "").strip()
@@ -208,15 +224,11 @@ def load_config() -> Config:
     state_file = Path(os.getenv("STATE_FILE", "state.json"))
 
     # Validate required settings before starting the bridge loop.
-    # Accept common bearer-token aliases to make CI/workflow setup more forgiving.
-    missing = [
-        name
-        for name, value in [
-            ("X_BEARER_TOKEN (or X_API_BEARER_TOKEN / TWITTER_BEARER_TOKEN)", x_bearer_token),
-            ("DISCORD_WEBHOOK_URL", discord_webhook_url),
-        ]
-        if not value
-    ]
+    missing = []
+    if require_x_token and not x_bearer_token:
+        missing.append("X_BEARER_TOKEN (or X_API_BEARER_TOKEN / TWITTER_BEARER_TOKEN)")
+    if not discord_webhook_url:
+        missing.append("DISCORD_WEBHOOK_URL")
 
     if missing:
         raise BridgeError(f"Missing environment variables: {', '.join(missing)}")
@@ -231,9 +243,7 @@ def load_config() -> Config:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Forward posts from X to Discord."
-    )
+    parser = argparse.ArgumentParser(description="Forward posts from X to Discord.")
     parser.add_argument(
         "--send-latest-once",
         action="store_true",
@@ -242,14 +252,27 @@ def parse_args() -> argparse.Namespace:
             "once, then exit. Useful for manual workflow testing."
         ),
     )
+    parser.add_argument(
+        "--webhook-test-only",
+        action="store_true",
+        help=(
+            "Send a Discord webhook-only test message and exit. "
+            "Does not require an X token."
+        ),
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    cfg = load_config()
-    bridge = XToDiscordBridge(cfg)
-    if args.send_latest_once:
-        bridge.send_latest_tweet_once()
+
+    if args.webhook_test_only:
+        cfg = load_config(require_x_token=False)
+        send_webhook_test_message(cfg.discord_webhook_url, cfg.x_username)
     else:
-        bridge.run()
+        cfg = load_config(require_x_token=True)
+        bridge = XToDiscordBridge(cfg)
+        if args.send_latest_once:
+            bridge.send_latest_tweet_once()
+        else:
+            bridge.run()

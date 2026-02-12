@@ -3,13 +3,21 @@ name: Manual X -> Discord test
 on:
   workflow_dispatch:
     inputs:
+      test_mode:
+        description: "Choose test mode"
+        required: true
+        default: "latest_post"
+        type: choice
+        options:
+          - latest_post
+          - webhook_only
       x_username:
         description: "X username to test (without @). Leave empty to use default/env value."
         required: false
         default: "hashtagutd"
 
 jobs:
-  send-latest-post:
+  send-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,6 +33,7 @@ jobs:
 
       - name: Resolve and validate credentials
         env:
+          TEST_MODE: ${{ github.event.inputs.test_mode }}
           # Secrets (recommended)
           SECRET_X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           SECRET_X_API_BEARER_TOKEN: ${{ secrets.X_API_BEARER_TOKEN }}
@@ -42,19 +51,25 @@ jobs:
           BEARER_TOKEN="${SECRET_X_BEARER_TOKEN:-${SECRET_X_API_BEARER_TOKEN:-${SECRET_TWITTER_BEARER_TOKEN:-${VAR_X_BEARER_TOKEN:-${VAR_X_API_BEARER_TOKEN:-${VAR_TWITTER_BEARER_TOKEN:-}}}}}}"
           DISCORD_WEBHOOK_URL="${SECRET_DISCORD_WEBHOOK_URL:-${VAR_DISCORD_WEBHOOK_URL:-}}"
 
-          if [ -z "${BEARER_TOKEN}" ]; then
-            echo "::error::Missing X bearer token. Add one of these as a Secret or Variable: X_BEARER_TOKEN, X_API_BEARER_TOKEN, or TWITTER_BEARER_TOKEN"
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "::error::Missing Discord webhook URL. Add DISCORD_WEBHOOK_URL as a Secret or Variable"
             exit 1
           fi
 
-          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
-            echo "::error::Missing Discord webhook URL. Add DISCORD_WEBHOOK_URL as a Secret or Variable"
+          if [ "${TEST_MODE}" = "latest_post" ] && [ -z "${BEARER_TOKEN}" ]; then
+            echo "::error::Missing X bearer token for latest_post mode. Add one of these as a Secret or Variable: X_BEARER_TOKEN, X_API_BEARER_TOKEN, or TWITTER_BEARER_TOKEN"
             exit 1
           fi
 
           echo "X_BEARER_TOKEN=${BEARER_TOKEN}" >> "$GITHUB_ENV"
           echo "DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}" >> "$GITHUB_ENV"
           echo "X_USERNAME=${X_USERNAME}" >> "$GITHUB_ENV"
+          echo "TEST_MODE=${TEST_MODE}" >> "$GITHUB_ENV"
 
-      - name: Run one-shot bridge test
-        run: python bridge.py --send-latest-once
+      - name: Run selected test mode
+        run: |
+          if [ "${TEST_MODE}" = "webhook_only" ]; then
+            python bridge.py --webhook-test-only
+          else
+            python bridge.py --send-latest-once
+          fi
