@@ -61,6 +61,20 @@ You can also run a quick live validation:
 3. Confirm that the post appears in your Discord channel.
 4. Restart the bridge and verify the same post is not re-sent.
 
+## GitHub Actions manual test (Run workflow)
+
+You can manually test the integration from GitHub without running the bot continuously.
+
+1. In your repository, go to **Settings → Secrets and variables → Actions** and add:
+   - `X_BEARER_TOKEN`
+   - `DISCORD_WEBHOOK_URL`
+2. Go to **Actions** and open the workflow **Manual X -> Discord test**.
+3. Click **Run workflow**.
+4. (Optional) Set `x_username` (without `@`) if you want to test another account.
+5. The workflow runs `python bridge.py --send-latest-once`, which fetches the latest original post and sends it to your Discord channel once.
+
+This is intended for manual validation and does not use `state.json`.
+
 ## Deployment suggestion
 
 Run it as a service on a VPS (for example with `systemd`) so it stays online.

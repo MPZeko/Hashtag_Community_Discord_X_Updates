@@ -1,0 +1,31 @@
+name: Manual X -> Discord test
+
+on:
+  workflow_dispatch:
+    inputs:
+      x_username:
+        description: "X username to test (without @). Leave empty to use default/env value."
+        required: false
+        default: "hashtagutd"
+
+jobs:
+  send-latest-post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run one-shot bridge test
+        env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          X_USERNAME: ${{ github.event.inputs.x_username }}
+        run: python bridge.py --send-latest-once

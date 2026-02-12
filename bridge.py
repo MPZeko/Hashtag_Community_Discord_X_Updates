@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -112,6 +113,13 @@ class XToDiscordBridge:
         tweets.sort(key=lambda t: int(t["id"]))
         return tweets
 
+    def _fetch_latest_tweet(self) -> Optional[dict]:
+        """Fetch the latest original tweet (excluding replies/retweets)."""
+        tweets = self._fetch_new_tweets(since_id=None)
+        if not tweets:
+            return None
+        return tweets[-1]
+
     def _post_to_discord(self, tweet: dict) -> None:
         tweet_id = tweet["id"]
         tweet_text = tweet.get("text", "")
@@ -176,6 +184,17 @@ class XToDiscordBridge:
             # Sleep between poll cycles to respect API limits and reduce noise.
             time.sleep(self.config.poll_interval_seconds)
 
+    def send_latest_tweet_once(self) -> None:
+        """One-shot mode used for manual validation (e.g., GitHub Actions)."""
+        logger.info("Running one-shot test: fetch latest tweet and post to Discord")
+        tweet = self._fetch_latest_tweet()
+        if not tweet:
+            logger.info("No tweets found for @%s", self.config.x_username)
+            return
+
+        self._post_to_discord(tweet)
+        logger.info("Successfully sent latest tweet %s to Discord", tweet["id"])
+
 
 def load_config() -> Config:
     x_bearer_token = os.getenv("X_BEARER_TOKEN", "").strip()
@@ -206,7 +225,26 @@ def load_config() -> Config:
     )
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Forward posts from X to Discord."
+    )
+    parser.add_argument(
+        "--send-latest-once",
+        action="store_true",
+        help=(
+            "Fetch the latest post from the configured account and send it to Discord "
+            "once, then exit. Useful for manual workflow testing."
+        ),
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
     cfg = load_config()
     bridge = XToDiscordBridge(cfg)
-    bridge.run()
+    if args.send_latest_once:
+        bridge.send_latest_tweet_once()
+    else:
+        bridge.run()
