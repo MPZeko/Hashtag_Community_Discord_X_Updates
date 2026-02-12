@@ -197,17 +197,22 @@ class XToDiscordBridge:
 
 
 def load_config() -> Config:
-    x_bearer_token = os.getenv("X_BEARER_TOKEN", "").strip()
+    x_bearer_token = (
+        os.getenv("X_BEARER_TOKEN", "").strip()
+        or os.getenv("X_API_BEARER_TOKEN", "").strip()
+        or os.getenv("TWITTER_BEARER_TOKEN", "").strip()
+    )
     x_username = os.getenv("X_USERNAME", "hashtagutd").strip()
     discord_webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
     poll_interval = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
     state_file = Path(os.getenv("STATE_FILE", "state.json"))
 
     # Validate required settings before starting the bridge loop.
+    # Accept common bearer-token aliases to make CI/workflow setup more forgiving.
     missing = [
         name
         for name, value in [
-            ("X_BEARER_TOKEN", x_bearer_token),
+            ("X_BEARER_TOKEN (or X_API_BEARER_TOKEN / TWITTER_BEARER_TOKEN)", x_bearer_token),
             ("DISCORD_WEBHOOK_URL", discord_webhook_url),
         ]
         if not value
