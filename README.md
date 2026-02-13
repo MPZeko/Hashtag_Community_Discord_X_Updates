@@ -62,27 +62,32 @@ You can also run a quick live validation:
 3. Confirm that the post appears in your Discord channel.
 4. Restart the bridge and verify the same post is not re-sent.
 
-## GitHub Actions manual test (Run workflow)
+## GitHub Actions (manual + automatic schedule)
 
-You can manually test the integration from GitHub without running the bot continuously.
+You can run the integration from GitHub Actions both manually and automatically on a schedule.
 
 1. In your repository, go to **Settings → Secrets and variables → Actions** and add credentials as either **Secrets** (recommended) or **Variables**:
    - `DISCORD_WEBHOOK_URL` (always required)
    - one of: `X_BEARER_TOKEN`, `X_API_BEARER_TOKEN`, or `TWITTER_BEARER_TOKEN` (required only for `latest_post` mode)
-2. Go to **Actions** and open the workflow **Manual X -> Discord test**.
-3. Click **Run workflow**.
-4. Choose `test_mode`:
+2. (Optional for automatic runs) Add these Actions Variables:
+   - `AUTO_TEST_MODE` (default: `latest_public_no_token`)
+   - `AUTO_X_USERNAME` (default: `hashtagutd`)
+3. The workflow runs automatically every 5 minutes (`cron: */5 * * * *`).
+4. For manual testing, go to **Actions** and open **Manual X -> Discord test**, then click **Run workflow**.
+5. Choose `test_mode` (manual run):
    - `latest_post`: fetch latest post from official X API and send it to Discord (**requires token**).
    - `latest_public_no_token`: fetch latest post from public RSS mirrors and send it to Discord (**no token**, best-effort).
    - `webhook_only`: send a Discord test message only (**no token**, does not fetch from X).
-5. (Optional) Set `x_username` (without `@`) if you want to test another account.
-6. (Optional) Add `PUBLIC_X_RSS_URL_TEMPLATES` (comma-separated) as an Actions Variable to override fallback RSS mirrors.
+6. (Optional) Set `x_username` (without `@`) if you want to test another account.
+7. (Optional) Add `PUBLIC_X_RSS_URL_TEMPLATES` (comma-separated) as an Actions Variable to override fallback RSS mirrors.
    - Example: `https://nitter.net/{username}/rss,https://nitter.poast.org/{username}/rss`
    - Backward-compatible single-source variable: `PUBLIC_X_RSS_URL_TEMPLATE`
 
 This is intended for manual validation and does not use `state.json`.
 
 If you do not have an X token, use `latest_public_no_token` or `webhook_only`.
+
+Note: GitHub Actions is polling-based, not real-time streaming. With `*/5` schedule, new posts are usually picked up within a few minutes.
 
 ## Deployment suggestion
 

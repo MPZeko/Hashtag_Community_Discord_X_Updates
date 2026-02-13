@@ -16,6 +16,8 @@ on:
         description: "X username to test (without @). Leave empty to use default/env value."
         required: false
         default: "hashtagutd"
+  schedule:
+    - cron: "*/5 * * * *"
 
 jobs:
   send-test:
@@ -34,7 +36,11 @@ jobs:
 
       - name: Resolve and validate credentials
         env:
-          TEST_MODE: ${{ github.event.inputs.test_mode }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TEST_MODE: ${{ github.event.inputs.test_mode }}
+          INPUT_X_USERNAME: ${{ github.event.inputs.x_username }}
+          AUTO_TEST_MODE: ${{ vars.AUTO_TEST_MODE }}
+          AUTO_X_USERNAME: ${{ vars.AUTO_X_USERNAME }}
           # Secrets (recommended)
           SECRET_X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           SECRET_X_API_BEARER_TOKEN: ${{ secrets.X_API_BEARER_TOKEN }}
@@ -45,11 +51,23 @@ jobs:
           VAR_X_API_BEARER_TOKEN: ${{ vars.X_API_BEARER_TOKEN }}
           VAR_TWITTER_BEARER_TOKEN: ${{ vars.TWITTER_BEARER_TOKEN }}
           VAR_DISCORD_WEBHOOK_URL: ${{ vars.DISCORD_WEBHOOK_URL }}
-          X_USERNAME: ${{ github.event.inputs.x_username }}
           PUBLIC_X_RSS_URL_TEMPLATE: ${{ vars.PUBLIC_X_RSS_URL_TEMPLATE }}
           PUBLIC_X_RSS_URL_TEMPLATES: ${{ vars.PUBLIC_X_RSS_URL_TEMPLATES }}
         run: |
           set -euo pipefail
+
+          # Mode selection
+          if [ "${EVENT_NAME}" = "schedule" ]; then
+            TEST_MODE="${AUTO_TEST_MODE:-latest_public_no_token}"
+            X_USERNAME="${AUTO_X_USERNAME:-hashtagutd}"
+          else
+            TEST_MODE="${INPUT_TEST_MODE:-latest_post}"
+            X_USERNAME="${INPUT_X_USERNAME:-hashtagutd}"
+          fi
+
+          if [ -z "${X_USERNAME}" ]; then
+            X_USERNAME="hashtagutd"
+          fi
 
           BEARER_TOKEN="${SECRET_X_BEARER_TOKEN:-${SECRET_X_API_BEARER_TOKEN:-${SECRET_TWITTER_BEARER_TOKEN:-${VAR_X_BEARER_TOKEN:-${VAR_X_API_BEARER_TOKEN:-${VAR_TWITTER_BEARER_TOKEN:-}}}}}}"
           DISCORD_WEBHOOK_URL="${SECRET_DISCORD_WEBHOOK_URL:-${VAR_DISCORD_WEBHOOK_URL:-}}"
