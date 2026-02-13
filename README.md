@@ -75,13 +75,17 @@ You can run the integration from GitHub Actions both manually and automatically 
 3. The workflow runs automatically once per hour (`cron: 0 * * * *`).
 4. For manual testing, go to **Actions** and open **Manual X -> Discord test**, then click **Run workflow**.
 5. Choose `test_mode` (manual run, default is `latest_public_no_token`):
-   - `latest_post`: fetch latest post from official X API and send it to Discord (**requires token**).
-   - `latest_public_no_token`: fetch latest post from public RSS mirrors and send it to Discord (**no token**, best-effort).
+   - `latest_post`: fetch latest post from official X API and send it to Discord (**requires token**, deduplicated).
+   - `latest_public_no_token`: fetch latest post from public RSS mirrors and send it to Discord (**no token**, best-effort, deduplicated).
    - `webhook_only`: send a Discord test message only (**no token**, does not fetch from X).
 6. (Optional) Set `x_username` (without `@`) if you want to test another account.
 7. (Optional) Add `PUBLIC_X_RSS_URL_TEMPLATES` (comma-separated) as an Actions Variable to override fallback RSS mirrors.
    - Example: `https://nitter.net/{username}/rss,https://nitter.poast.org/{username}/rss`
    - Backward-compatible single-source variable: `PUBLIC_X_RSS_URL_TEMPLATE`
+
+8. (Optional) `ENABLE_DEDUPLICATION` Actions Variable controls duplicate prevention (`true` by default).
+
+The workflow now stores a small state file in Actions cache (`.state/<mode>-<username>.json`) so hourly runs do not repost the same latest item.
 
 This is intended for manual validation and does not use `state.json`.
 

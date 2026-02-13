@@ -41,6 +41,31 @@ class BridgeError(Exception):
     pass
 
 
+
+
+def _is_deduplication_enabled() -> bool:
+    value = os.getenv("ENABLE_DEDUPLICATION", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _load_last_seen_from_state(state_file: Path) -> Optional[str]:
+    if not state_file.exists():
+        return None
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        return data.get("last_seen_id")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_last_seen_to_state(state_file: Path, value: str) -> None:
+    payload = {"last_seen_id": value}
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 class XToDiscordBridge:
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -200,8 +225,21 @@ class XToDiscordBridge:
             logger.info("No tweets found for @%s", self.config.x_username)
             return
 
+        dedupe_enabled = _is_deduplication_enabled()
+        latest_id = tweet["id"]
+        last_seen_id = self._load_last_seen_id() if dedupe_enabled else None
+
+        if dedupe_enabled and last_seen_id == latest_id:
+            logger.info(
+                "Latest tweet %s already processed (dedup enabled); skipping Discord post",
+                latest_id,
+            )
+            return
+
         self._post_to_discord(tweet)
-        logger.info("Successfully sent latest tweet %s to Discord", tweet["id"])
+        if dedupe_enabled:
+            self._save_last_seen_id(latest_id)
+        logger.info("Successfully sent latest tweet %s to Discord", latest_id)
 
 
 def send_webhook_test_message(webhook_url: str, x_username: str) -> None:
@@ -256,6 +294,9 @@ def send_latest_public_post_once(config: Config) -> None:
     templates = _get_public_rss_templates()
     errors: list[str] = []
 
+    dedupe_enabled = _is_deduplication_enabled()
+    last_seen_id = _load_last_seen_from_state(config.state_file) if dedupe_enabled else None
+
     for template in templates:
         rss_url = template.format(username=config.x_username)
         logger.info("Fetching latest public RSS item from %s", rss_url)
@@ -286,6 +327,14 @@ def send_latest_public_post_once(config: Config) -> None:
             errors.append(f"{rss_url}: invalid RSS ({exc})")
             continue
 
+        # Use link (preferred) or title as a stable dedupe id for one-shot scheduled runs.
+        latest_id = (link or title).strip()
+        if dedupe_enabled and latest_id and last_seen_id == latest_id:
+            logger.info(
+                "Latest public item already processed (dedup enabled); skipping Discord post"
+            )
+            return
+
         message_text = html.unescape(title or description or "Latest public post")
         if len(message_text) > 4000:
             message_text = f"{message_text[:3997]}..."
@@ -312,6 +361,9 @@ def send_latest_public_post_once(config: Config) -> None:
                 "Could not send public fallback post to Discord "
                 f"({discord_response.status_code}): {discord_response.text}"
             )
+
+        if dedupe_enabled and latest_id:
+            _save_last_seen_to_state(config.state_file, latest_id)
 
         logger.info("Successfully sent latest public fallback post to Discord")
         return

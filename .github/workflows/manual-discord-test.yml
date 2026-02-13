@@ -41,6 +41,7 @@ jobs:
           INPUT_X_USERNAME: ${{ github.event.inputs.x_username }}
           AUTO_TEST_MODE: ${{ vars.AUTO_TEST_MODE }}
           AUTO_X_USERNAME: ${{ vars.AUTO_X_USERNAME }}
+          ENABLE_DEDUPLICATION: ${{ vars.ENABLE_DEDUPLICATION }}
           # Secrets (recommended)
           SECRET_X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           SECRET_X_API_BEARER_TOKEN: ${{ secrets.X_API_BEARER_TOKEN }}
@@ -61,7 +62,7 @@ jobs:
             TEST_MODE="${AUTO_TEST_MODE:-latest_public_no_token}"
             X_USERNAME="${AUTO_X_USERNAME:-hashtagutd}"
           else
-            TEST_MODE="${INPUT_TEST_MODE:-latest_post}"
+            TEST_MODE="${INPUT_TEST_MODE:-latest_public_no_token}"
             X_USERNAME="${INPUT_X_USERNAME:-hashtagutd}"
           fi
 
@@ -82,16 +83,29 @@ jobs:
             exit 1
           fi
 
+          # Keep state separated by mode + username to prevent duplicate hourly sends.
+          STATE_FILE=".state/${TEST_MODE}-${X_USERNAME}.json"
+
           echo "X_BEARER_TOKEN=${BEARER_TOKEN}" >> "$GITHUB_ENV"
           echo "DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}" >> "$GITHUB_ENV"
           echo "X_USERNAME=${X_USERNAME}" >> "$GITHUB_ENV"
           echo "TEST_MODE=${TEST_MODE}" >> "$GITHUB_ENV"
+          echo "STATE_FILE=${STATE_FILE}" >> "$GITHUB_ENV"
+          echo "ENABLE_DEDUPLICATION=${ENABLE_DEDUPLICATION:-true}" >> "$GITHUB_ENV"
 
           if [ -n "${PUBLIC_X_RSS_URL_TEMPLATES:-}" ]; then
             echo "PUBLIC_X_RSS_URL_TEMPLATES=${PUBLIC_X_RSS_URL_TEMPLATES}" >> "$GITHUB_ENV"
           elif [ -n "${PUBLIC_X_RSS_URL_TEMPLATE:-}" ]; then
             echo "PUBLIC_X_RSS_URL_TEMPLATE=${PUBLIC_X_RSS_URL_TEMPLATE}" >> "$GITHUB_ENV"
           fi
+
+      - name: Restore dedupe state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: x-discord-state-${{ env.TEST_MODE }}-${{ env.X_USERNAME }}-${{ github.run_id }}
+          restore-keys: |
+            x-discord-state-${{ env.TEST_MODE }}-${{ env.X_USERNAME }}-
 
       - name: Run selected test mode
         run: |
@@ -102,3 +116,10 @@ jobs:
           else
             python bridge.py --send-latest-once
           fi
+
+      - name: Save dedupe state cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: x-discord-state-${{ env.TEST_MODE }}-${{ env.X_USERNAME }}-${{ github.run_id }}
