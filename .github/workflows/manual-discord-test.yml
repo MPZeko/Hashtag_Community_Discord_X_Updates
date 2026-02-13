@@ -47,6 +47,7 @@ jobs:
           VAR_DISCORD_WEBHOOK_URL: ${{ vars.DISCORD_WEBHOOK_URL }}
           X_USERNAME: ${{ github.event.inputs.x_username }}
           PUBLIC_X_RSS_URL_TEMPLATE: ${{ vars.PUBLIC_X_RSS_URL_TEMPLATE }}
+          PUBLIC_X_RSS_URL_TEMPLATES: ${{ vars.PUBLIC_X_RSS_URL_TEMPLATES }}
         run: |
           set -euo pipefail
 
@@ -68,7 +69,9 @@ jobs:
           echo "X_USERNAME=${X_USERNAME}" >> "$GITHUB_ENV"
           echo "TEST_MODE=${TEST_MODE}" >> "$GITHUB_ENV"
 
-          if [ -n "${PUBLIC_X_RSS_URL_TEMPLATE:-}" ]; then
+          if [ -n "${PUBLIC_X_RSS_URL_TEMPLATES:-}" ]; then
+            echo "PUBLIC_X_RSS_URL_TEMPLATES=${PUBLIC_X_RSS_URL_TEMPLATES}" >> "$GITHUB_ENV"
+          elif [ -n "${PUBLIC_X_RSS_URL_TEMPLATE:-}" ]; then
             echo "PUBLIC_X_RSS_URL_TEMPLATE=${PUBLIC_X_RSS_URL_TEMPLATE}" >> "$GITHUB_ENV"
           fi
 

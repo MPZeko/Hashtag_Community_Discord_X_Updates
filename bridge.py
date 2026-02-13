@@ -21,7 +21,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("x-discord-bridge")
 
-DEFAULT_PUBLIC_X_RSS_URL_TEMPLATE = "https://nitter.net/{username}/rss"
+DEFAULT_PUBLIC_X_RSS_URL_TEMPLATES = [
+    "https://nitter.net/{username}/rss",
+    "https://nitter.poast.org/{username}/rss",
+    "https://nitter.privacydev.net/{username}/rss",
+]
 
 
 @dataclass
@@ -216,32 +220,23 @@ def send_webhook_test_message(webhook_url: str, x_username: str) -> None:
         )
 
 
-def send_latest_public_post_once(config: Config) -> None:
-    """
-    Best-effort no-token fallback:
-    fetch latest post from a public RSS mirror and send to Discord.
-    """
-    template = os.getenv(
-        "PUBLIC_X_RSS_URL_TEMPLATE", DEFAULT_PUBLIC_X_RSS_URL_TEMPLATE
-    ).strip()
-    rss_url = template.format(username=config.x_username)
+def _get_public_rss_templates() -> list[str]:
+    """Resolve RSS templates from env or use built-in defaults."""
+    templates_csv = os.getenv("PUBLIC_X_RSS_URL_TEMPLATES", "").strip()
+    if templates_csv:
+        templates = [t.strip() for t in templates_csv.split(",") if t.strip()]
+        if templates:
+            return templates
 
-    logger.info("Fetching latest public RSS item from %s", rss_url)
-    response = requests.get(
-        rss_url,
-        timeout=20,
-        headers={"User-Agent": "hashtag-utd-x-discord-bridge/1.0"},
-    )
-    if response.status_code >= 400:
-        raise BridgeError(
-            f"Could not fetch public RSS feed ({response.status_code}): {response.text[:200]}"
-        )
+    single_template = os.getenv("PUBLIC_X_RSS_URL_TEMPLATE", "").strip()
+    if single_template:
+        return [single_template]
 
-    try:
-        root = ET.fromstring(response.text)
-    except ET.ParseError as exc:
-        raise BridgeError(f"Could not parse RSS XML: {exc}") from exc
+    return DEFAULT_PUBLIC_X_RSS_URL_TEMPLATES
 
+
+def _extract_latest_rss_item(xml_text: str) -> tuple[str, str, str]:
+    root = ET.fromstring(xml_text)
     channel = root.find("channel")
     if channel is None:
         raise BridgeError("RSS feed did not contain a channel node")
@@ -253,33 +248,77 @@ def send_latest_public_post_once(config: Config) -> None:
     title = (item.findtext("title") or "").strip()
     link = (item.findtext("link") or "").strip()
     description = (item.findtext("description") or "").strip()
+    return title, link, description
 
-    text = html.unescape(title or description or "Latest public post")
-    if len(text) > 4000:
-        text = f"{text[:3997]}..."
 
-    embed = {
-        "title": f"Latest public post from @{config.x_username}",
-        "description": text,
-        "url": link if link else f"https://x.com/{config.x_username}",
-        "color": 1942002,
-        "footer": {"text": "X → Discord bridge (public RSS fallback)"},
-    }
+def send_latest_public_post_once(config: Config) -> None:
+    """Best-effort no-token fallback from public RSS mirrors."""
+    templates = _get_public_rss_templates()
+    errors: list[str] = []
 
-    payload = {
-        "username": "Hashtag Utd X Bot",
-        "content": f"📡 Public fallback latest post for @{config.x_username}",
-        "embeds": [embed],
-    }
+    for template in templates:
+        rss_url = template.format(username=config.x_username)
+        logger.info("Fetching latest public RSS item from %s", rss_url)
 
-    discord_response = requests.post(config.discord_webhook_url, json=payload, timeout=20)
-    if discord_response.status_code >= 400:
-        raise BridgeError(
-            "Could not send public fallback post to Discord "
-            f"({discord_response.status_code}): {discord_response.text}"
+        try:
+            response = requests.get(
+                rss_url,
+                timeout=20,
+                headers={"User-Agent": "hashtag-utd-x-discord-bridge/1.0"},
+            )
+        except requests.RequestException as exc:
+            errors.append(f"{rss_url}: request failed ({exc})")
+            continue
+
+        if response.status_code == 429:
+            errors.append(f"{rss_url}: rate limited (429)")
+            continue
+
+        if response.status_code >= 400:
+            errors.append(
+                f"{rss_url}: HTTP {response.status_code} {response.text[:120]}"
+            )
+            continue
+
+        try:
+            title, link, description = _extract_latest_rss_item(response.text)
+        except (ET.ParseError, BridgeError) as exc:
+            errors.append(f"{rss_url}: invalid RSS ({exc})")
+            continue
+
+        message_text = html.unescape(title or description or "Latest public post")
+        if len(message_text) > 4000:
+            message_text = f"{message_text[:3997]}..."
+
+        embed = {
+            "title": f"Latest public post from @{config.x_username}",
+            "description": message_text,
+            "url": link if link else f"https://x.com/{config.x_username}",
+            "color": 1942002,
+            "footer": {"text": f"X → Discord bridge (public RSS fallback: {rss_url})"},
+        }
+
+        payload = {
+            "username": "Hashtag Utd X Bot",
+            "content": f"📡 Public fallback latest post for @{config.x_username}",
+            "embeds": [embed],
+        }
+
+        discord_response = requests.post(
+            config.discord_webhook_url, json=payload, timeout=20
         )
+        if discord_response.status_code >= 400:
+            raise BridgeError(
+                "Could not send public fallback post to Discord "
+                f"({discord_response.status_code}): {discord_response.text}"
+            )
 
-    logger.info("Successfully sent latest public fallback post to Discord")
+        logger.info("Successfully sent latest public fallback post to Discord")
+        return
+
+    raise BridgeError(
+        "Could not fetch public RSS feed from any mirror. Tried: " + " | ".join(errors)
+    )
 
 
 def load_config(require_x_token: bool = True) -> Config:

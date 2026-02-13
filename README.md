@@ -73,10 +73,12 @@ You can manually test the integration from GitHub without running the bot contin
 3. Click **Run workflow**.
 4. Choose `test_mode`:
    - `latest_post`: fetch latest post from official X API and send it to Discord (**requires token**).
-   - `latest_public_no_token`: fetch latest post from a public RSS mirror and send it to Discord (**no token**, best-effort).
+   - `latest_public_no_token`: fetch latest post from public RSS mirrors and send it to Discord (**no token**, best-effort).
    - `webhook_only`: send a Discord test message only (**no token**, does not fetch from X).
 5. (Optional) Set `x_username` (without `@`) if you want to test another account.
-6. (Optional) Add `PUBLIC_X_RSS_URL_TEMPLATE` as an Actions Variable to override the fallback feed source (default: `https://nitter.net/{username}/rss`).
+6. (Optional) Add `PUBLIC_X_RSS_URL_TEMPLATES` (comma-separated) as an Actions Variable to override fallback RSS mirrors.
+   - Example: `https://nitter.net/{username}/rss,https://nitter.poast.org/{username}/rss`
+   - Backward-compatible single-source variable: `PUBLIC_X_RSS_URL_TEMPLATE`
 
 This is intended for manual validation and does not use `state.json`.
 
