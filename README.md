@@ -72,9 +72,9 @@ You can run the integration from GitHub Actions both manually and automatically 
 2. (Optional for automatic runs) Add these Actions Variables:
    - `AUTO_TEST_MODE` (default: `latest_public_no_token`)
    - `AUTO_X_USERNAME` (default: `hashtagutd`)
-3. The workflow runs automatically every 5 minutes (`cron: */5 * * * *`).
+3. The workflow runs automatically once per hour (`cron: 0 * * * *`).
 4. For manual testing, go to **Actions** and open **Manual X -> Discord test**, then click **Run workflow**.
-5. Choose `test_mode` (manual run):
+5. Choose `test_mode` (manual run, default is `latest_public_no_token`):
    - `latest_post`: fetch latest post from official X API and send it to Discord (**requires token**).
    - `latest_public_no_token`: fetch latest post from public RSS mirrors and send it to Discord (**no token**, best-effort).
    - `webhook_only`: send a Discord test message only (**no token**, does not fetch from X).
@@ -87,7 +87,7 @@ This is intended for manual validation and does not use `state.json`.
 
 If you do not have an X token, use `latest_public_no_token` or `webhook_only`.
 
-Note: GitHub Actions is polling-based, not real-time streaming. With `*/5` schedule, new posts are usually picked up within a few minutes.
+Note: GitHub Actions is polling-based, not real-time streaming. With hourly schedule, new posts are typically picked up within up to ~60 minutes.
 
 ## Deployment suggestion
 

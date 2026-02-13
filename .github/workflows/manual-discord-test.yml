@@ -6,7 +6,7 @@ on:
       test_mode:
         description: "Choose test mode"
         required: true
-        default: "latest_post"
+        default: "latest_public_no_token"
         type: choice
         options:
           - latest_post
@@ -17,7 +17,7 @@ on:
         required: false
         default: "hashtagutd"
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 * * * *"
 
 jobs:
   send-test:
