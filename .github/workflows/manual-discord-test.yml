@@ -1,0 +1,86 @@
+name: Manual X -> Discord test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: "Choose test mode"
+        required: true
+        default: "latest_post"
+        type: choice
+        options:
+          - latest_post
+          - latest_public_no_token
+          - webhook_only
+      x_username:
+        description: "X username to test (without @). Leave empty to use default/env value."
+        required: false
+        default: "hashtagutd"
+
+jobs:
+  send-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Resolve and validate credentials
+        env:
+          TEST_MODE: ${{ github.event.inputs.test_mode }}
+          # Secrets (recommended)
+          SECRET_X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          SECRET_X_API_BEARER_TOKEN: ${{ secrets.X_API_BEARER_TOKEN }}
+          SECRET_TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          SECRET_DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Repository/environment variables (fallback)
+          VAR_X_BEARER_TOKEN: ${{ vars.X_BEARER_TOKEN }}
+          VAR_X_API_BEARER_TOKEN: ${{ vars.X_API_BEARER_TOKEN }}
+          VAR_TWITTER_BEARER_TOKEN: ${{ vars.TWITTER_BEARER_TOKEN }}
+          VAR_DISCORD_WEBHOOK_URL: ${{ vars.DISCORD_WEBHOOK_URL }}
+          X_USERNAME: ${{ github.event.inputs.x_username }}
+          PUBLIC_X_RSS_URL_TEMPLATE: ${{ vars.PUBLIC_X_RSS_URL_TEMPLATE }}
+          PUBLIC_X_RSS_URL_TEMPLATES: ${{ vars.PUBLIC_X_RSS_URL_TEMPLATES }}
+        run: |
+          set -euo pipefail
+
+          BEARER_TOKEN="${SECRET_X_BEARER_TOKEN:-${SECRET_X_API_BEARER_TOKEN:-${SECRET_TWITTER_BEARER_TOKEN:-${VAR_X_BEARER_TOKEN:-${VAR_X_API_BEARER_TOKEN:-${VAR_TWITTER_BEARER_TOKEN:-}}}}}}"
+          DISCORD_WEBHOOK_URL="${SECRET_DISCORD_WEBHOOK_URL:-${VAR_DISCORD_WEBHOOK_URL:-}}"
+
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "::error::Missing Discord webhook URL. Add DISCORD_WEBHOOK_URL as a Secret or Variable"
+            exit 1
+          fi
+
+          if [ "${TEST_MODE}" = "latest_post" ] && [ -z "${BEARER_TOKEN}" ]; then
+            echo "::error::Missing X bearer token for latest_post mode. Use latest_public_no_token mode if you do not have a token."
+            exit 1
+          fi
+
+          echo "X_BEARER_TOKEN=${BEARER_TOKEN}" >> "$GITHUB_ENV"
+          echo "DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}" >> "$GITHUB_ENV"
+          echo "X_USERNAME=${X_USERNAME}" >> "$GITHUB_ENV"
+          echo "TEST_MODE=${TEST_MODE}" >> "$GITHUB_ENV"
+
+          if [ -n "${PUBLIC_X_RSS_URL_TEMPLATES:-}" ]; then
+            echo "PUBLIC_X_RSS_URL_TEMPLATES=${PUBLIC_X_RSS_URL_TEMPLATES}" >> "$GITHUB_ENV"
+          elif [ -n "${PUBLIC_X_RSS_URL_TEMPLATE:-}" ]; then
+            echo "PUBLIC_X_RSS_URL_TEMPLATE=${PUBLIC_X_RSS_URL_TEMPLATE}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run selected test mode
+        run: |
+          if [ "${TEST_MODE}" = "webhook_only" ]; then
+            python bridge.py --webhook-test-only
+          elif [ "${TEST_MODE}" = "latest_public_no_token" ]; then
+            python bridge.py --send-latest-public-once
+          else
+            python bridge.py --send-latest-once
+          fi
